@@ -21,12 +21,12 @@ pub struct Server<P: Protocol> {
 impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// Create a new server.
     ///
-    /// This will create a tcp listener from the address string.
-    /// Network config and protocol is used for all connections.
+    /// This will create a tcp listener from the address string. Network config and protocol is used
+    /// for all connections.
     ///
     /// # Panics
-    /// If addr is not able to be converted into a SocketAddr.
-    /// This will print the panic message "Invalid address".
+    /// If addr is not able to be converted into a SocketAddr. This will print the panic message
+    /// 'Invalid address'.
     ///
     /// # Examples
     ///
@@ -57,9 +57,8 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
 
     /// Connect to clients and spawn a task.
     ///
-    /// This starts a loop of trying to connect to a client.
-    /// Calls Arc::clone() on the server and moves the connection to the task.
-    /// This keeps the server async and responsive.
+    /// This starts a loop of trying to connect to a client. Calls Arc::clone() on the server and
+    /// moves the connection to the task. This keeps the server async and responsive.
     ///
     /// # Errors
     /// Propagates error from accepting on TcpListener.
@@ -108,9 +107,9 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// Access the SocketAddr the server is listening on.
     ///
     /// # Panics
-    /// If accessing local address of TcpListener returns error.
-    /// This could happen if socket is closed, or an OS-level error.
-    /// At this point, server cannot operate since listener is corrupt.
+    /// If accessing local address of TcpListener returns error. This could happen if socket is
+    /// closed, or an OS-level error. If this happens, the server will be closed since its
+    /// listener is corrupt.
     pub fn local_addr(&self) -> SocketAddr {
         self.listener.local_addr().unwrap()
     }
