@@ -31,13 +31,18 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// # Examples
     ///
     /// ```
-    /// use std::Duration;
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     use std::time::Duration;
     ///
-    /// let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
-    /// let protocol = polaris::HttpProtocol::new();
+    ///     let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
+    ///     let protocol = polaris::HttpProtocol::new();
     ///
-    /// // Use localhost (connect to same machine)
-    /// let server = polaris::Server::new("127.0.0.1:8080", config, protocol);
+    ///     // Use localhost (connect to same machine)
+    ///     let server = polaris::Server::new("127.0.0.1:0", config, protocol)
+    ///         .await
+    ///         .expect("Failed to create server");
+    /// }
     /// ```
     pub async fn new(addr: &str, config: NetworkConfig, protocol: P) -> tokio::io::Result<Self> {
         let sock: SocketAddr = addr.parse().expect("Invalid address");
@@ -61,28 +66,43 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///
     /// # Examples
     ///
-    /// ```
-    /// # use std::Duration;
+    /// ```rust,no_run
+    /// use std::time::Duration;
+    /// use std::sync::Arc;
+    /// use log::warn;
     ///
-    /// # let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
-    /// # let protocol = polaris::HttpProtocol::new();
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
+    ///     let protocol = polaris::HttpProtocol::new();
+    ///     let server = polaris::Server::new("127.0.0.1:8080", config, protocol)
+    ///         .await
+    ///         .expect("Failed to create server");
     ///
-    /// let server = polaris::Server::new("127.0.0.1:8080", config, protocol);
+    ///     let server = Arc::new(server);
     ///
-    /// // Initiate server loop
-    /// if let Err(e) = server.run().await {
-    ///     warn!("Failed to accept with error: {}", e);
+    ///     loop {
+    ///         let server_ptr = Arc::clone(&server);
+    ///         if let Err(e) = server_ptr.run().await {
+    ///             warn!("Failed to accept with error: {}", e);
+    ///         }
+    ///
+    ///         // Reaches here if a client has connected.
+    ///         println!("Client connected");
+    ///     }
+    ///
+    ///     // Go to 127.0.0.1:8080 in browser to test it.
     /// }
     /// ```
     pub async fn run(self: Arc<Self>) -> tokio::io::Result<()> {
-        loop {
-            let (stream, _) = self.listener.accept().await?;
+        let (stream, _) = self.listener.accept().await?;
 
-            let server_ptr = Arc::clone(&self);
-            tokio::spawn(async move {
-                server_ptr.handle_connection(stream).await;
-            });
-        }
+        let server_ptr = Arc::clone(&self);
+        tokio::spawn(async move {
+            server_ptr.handle_connection(stream).await;
+        });
+
+        Ok(())
     }
 
     /// Access the SocketAddr the server is listening on.

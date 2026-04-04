@@ -26,9 +26,18 @@ async fn main() {
         .expect("Failed to create server");
 
     let server = Arc::new(server);
+    let mut count = 0;
 
-    if let Err(e) = server.run().await {
-        warn!("Failed to accept with error: {}", e);
+    loop {
+        let server_ptr = Arc::clone(&server);
+        if let Err(e) = server_ptr.run().await {
+            warn!("Failed to accept with error: {}", e);
+        }
+
+        count += 1;
+        if count % 10 == 0 {
+            println!("Total visits: {count}");
+        }
     }
 }
 
