@@ -4,14 +4,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::{Duration, timeout};
 
-pub struct Network {
+/// Struct for collecting and sending bytes.
+pub(crate) struct Network {
     stream: TcpStream,
     buf: NetworkBuffer,
     config: NetworkConfig,
 }
 
 impl Network {
-    pub fn new(stream: TcpStream, config: NetworkConfig) -> Self {
+    pub(crate) fn new(stream: TcpStream, config: NetworkConfig) -> Self {
         Network {
             stream,
             buf: NetworkBuffer::new(config.buf_size),
@@ -19,7 +20,10 @@ impl Network {
         }
     }
 
-    pub async fn read(&mut self) -> ReadResult {
+    /// Reads into unfilled part of the buffer.
+    /// Will update the filled count after reading.
+    pub(crate) async fn read(&mut self) -> ReadResult {
+        // Read from free buffer space, limit to timeout length.
         let n = match timeout(
             self.config.timeout,
             self.stream.read(&mut self.buf.storage[self.buf.filled..]),
@@ -41,23 +45,25 @@ impl Network {
         ReadResult::Data
     }
 
-    pub async fn write(&mut self, buf: &[u8]) -> tokio::io::Result<()> {
+    pub(crate) async fn write(&mut self, buf: &[u8]) -> tokio::io::Result<()> {
         self.stream.write_all(buf).await?;
         self.stream.flush().await?;
 
         Ok(())
     }
 
-    pub fn data(&self) -> &[u8] {
+    #[inline]
+    pub(crate) fn data(&self) -> &[u8] {
         &self.buf.storage[..self.buf.filled]
     }
 
-    pub fn reset(&mut self, pos: usize) {
+    #[inline]
+    pub(crate) fn reset(&mut self, pos: usize) {
         self.buf.shift(pos);
     }
 }
 
-pub enum ReadResult {
+pub(crate) enum ReadResult {
     IoError,
     NoData,
     Timeout,
@@ -66,12 +72,27 @@ pub enum ReadResult {
 }
 
 #[derive(Copy, Clone)]
+/// Configuration for Network.
+/// Determines read timeout and size of network buffer.
 pub struct NetworkConfig {
     timeout: Duration,
     buf_size: NonZeroUsize,
 }
 
 impl NetworkConfig {
+    /// Initializes NetworkConfig.
+    ///
+    /// Timeout can be any chosen unit supported by Duration
+    /// buf_size must be greater than 0.
+    ///
+    /// # Panic
+    /// If buf_size is 0.
+    ///
+    /// # Example
+    ///
+    /// use std::time::Duration;
+    ///
+    /// let config = polaris::NetworkConfig::new(Duration::from_millis(2300), 8192);
     pub fn new(timeout: Duration, buf_size: usize) -> Self {
         NetworkConfig {
             timeout,
@@ -93,6 +114,7 @@ impl NetworkBuffer {
         }
     }
 
+    /// Replaces stale bytes with the leftover bytes.
     fn shift(&mut self, pos: usize) {
         assert!(pos <= self.filled, "pos exceeds filled bytes");
         self.storage.copy_within(pos.., 0);
