@@ -9,33 +9,17 @@ use crate::network::{Network, NetworkConfig, ReadResult};
 use crate::protocol::Framing;
 use crate::protocol::Protocol;
 
-#[allow(dead_code)]
-struct ServerConfig {
-    max_clients: usize,
+pub struct ServerConfig {
     buf_size: usize,
     timeout: Duration,
 }
 
-#[allow(dead_code)]
-struct ServerConfigBuilder {
-    max_clients: usize,
-    buf_size: usize,
-    timeout: Duration,
-}
-
-#[allow(dead_code)]
-impl ServerConfigBuilder {
+impl ServerConfig {
     pub fn new() -> Self {
         Self {
-            max_clients: 100,
             buf_size: 4096,
             timeout: Duration::from_secs(5),
         }
-    }
-
-    pub fn max_clients(mut self, n: usize) -> Self {
-        self.max_clients = n;
-        self
     }
 
     pub fn buf_size(mut self, n: usize) -> Self {
@@ -47,16 +31,6 @@ impl ServerConfigBuilder {
         self.timeout = n;
         self
     }
-
-    pub fn build(self) -> ServerConfig {
-        assert!(self.max_clients > 0, "Max clients must be more than 0");
-        assert!(self.buf_size > 0, "Buffer size must be more than 0");
-        ServerConfig {
-            max_clients: self.max_clients,
-            buf_size: self.buf_size,
-            timeout: self.timeout,
-        }
-    }
 }
 
 /// Connects to clients and runs through event loop.
@@ -65,14 +39,14 @@ impl ServerConfigBuilder {
 /// Each connection loop: read, parse, route, serialize, send.
 pub struct Server<P: Protocol> {
     listener: TcpListener,
-    config: NetworkConfig,
+    config: ServerConfig,
     protocol: P,
 }
 
 impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// Create a new server.
     ///
-    /// This will create a tcp listener from the address string. Network config and protocol is used
+    /// This will create a tcp listener from the address string. [ServerConfig] and protocol is used
     /// for all connections.
     ///
     /// # Panics
@@ -86,7 +60,11 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// async fn main() {
     ///     use std::time::Duration;
     ///
-    ///     let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
+    ///     let config = polaris::Server::new
+    ///         .max_clients(300)
+    ///         .buf_size(8192)
+    ///         .timeout(Duration::from_millis(3500)
+    ///
     ///     let protocol = polaris::HttpProtocol::new();
     ///
     ///     // Use localhost (connect to same machine)
@@ -95,7 +73,9 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///         .expect("Failed to create server");
     /// }
     /// ```
-    pub async fn new(addr: &str, config: NetworkConfig, protocol: P) -> tokio::io::Result<Self> {
+    pub async fn new(addr: &str, config: ServerConfig, protocol: P) -> tokio::io::Result<Self> {
+        assert!(config.buf_size > 0, "Buffer size must be larger than zero");
+
         let sock: SocketAddr = addr.parse().expect("Invalid address");
         let listener = TcpListener::bind(sock).await?;
 
@@ -123,7 +103,11 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
+    ///     let config = polaris::ServerConfigBuilder::new
+    ///         .max_clients(300)
+    ///         .buf_size(8192)
+    ///         .timeout(Duration::from_millis(3500)
+    ///
     ///     let protocol = polaris::HttpProtocol::new();
     ///     let server = polaris::Server::new("127.0.0.1:8080", config, protocol)
     ///         .await
@@ -167,7 +151,8 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
 
     async fn handle_connection(&self, stream: TcpStream) {
         info!("Connected to client");
-        let network = Network::new(stream, self.config);
+        let config = NetworkConfig::new(self.config.timeout, self.config.buf_size);
+        let network = Network::new(stream, config);
 
         self.connection_loop(network).await;
         info!("Dropping connection");
