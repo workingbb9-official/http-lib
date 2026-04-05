@@ -15,6 +15,7 @@ use crate::protocol::Protocol;
 /// created once when the server is initialized, and cannot change. Eventually each client will
 /// have their own configuration, allowing the user to modify it through the protocol.
 pub struct ServerConfig {
+    max_clients: usize,
     buf_size: usize,
     timeout: Duration,
 }
@@ -22,13 +23,21 @@ pub struct ServerConfig {
 impl ServerConfig {
     /// Create config with defaults.
     ///
-    /// The buffer size is defaulted to 4096.
-    /// Timeout is defaulted to 5 seconds.
+    /// Max clients defaults to 100 clients.
+    /// Buffer size defaults to 4096 bytes.
+    /// Timeout defualts to 5 seconds.
     pub fn new() -> Self {
         Self {
+            max_clients: 100,
             buf_size: 4096,
             timeout: Duration::from_secs(5),
         }
+    }
+
+    /// Sets max number of clients server can hold.
+    pub fn max_clients(mut self, n: usize) -> Self {
+        self.max_clients = n;
+        self
     }
 
     /// Sets buffer size for reading from network.
@@ -48,6 +57,16 @@ impl ServerConfig {
     pub fn timeout(mut self, n: Duration) -> Self {
         self.timeout = n;
         self
+    }
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            max_clients: 100,
+            buf_size: 4096,
+            timeout: Duration::from_secs(5),
+        }
     }
 }
 
