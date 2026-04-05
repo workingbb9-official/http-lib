@@ -9,12 +9,21 @@ use crate::network::{Network, ReadResult};
 use crate::protocol::Framing;
 use crate::protocol::Protocol;
 
+/// Configures connections for the server.
+///
+/// This struct is attached to the server and it will be used for each client. For now, it is
+/// created once when the server is initialized, and cannot change. Eventually each client will
+/// have their own configuration, allowing the user to modify it through the protocol.
 pub struct ServerConfig {
     buf_size: usize,
     timeout: Duration,
 }
 
 impl ServerConfig {
+    /// Create config with defaults.
+    ///
+    /// The buffer size is defaulted to 4096.
+    /// Timeout is defaulted to 5 seconds.
     pub fn new() -> Self {
         Self {
             buf_size: 4096,
@@ -22,11 +31,20 @@ impl ServerConfig {
         }
     }
 
+    /// Sets buffer size for reading from network.
+    ///
+    /// The network module will allocate this much upfront for each client. Size is fixed for all
+    /// clients, so ensure this is as large as the max payload the server is expected to receive.
     pub fn buf_size(mut self, n: usize) -> Self {
         self.buf_size = n;
         self
     }
 
+    /// Sets amount of time to wait for bytes from client.
+    ///
+    /// This is used in conjunction with timeout() function from Tokio. It can be in any unit
+    /// supported by std::time::Duration. If the user times out, the client will be dropped. This
+    /// is important to prevent clients from staying connected while inactive.
     pub fn timeout(mut self, n: Duration) -> Self {
         self.timeout = n;
         self
@@ -46,12 +64,12 @@ pub struct Server<P: Protocol> {
 impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// Create a new server.
     ///
-    /// This will create a tcp listener from the address string. [ServerConfig] and protocol is used
-    /// for all connections.
+    /// This will create a tcp listener from the address string. Both [ServerConfig] and protocol
+    /// are used for all connections.
     ///
     /// # Panics
     /// If addr is not able to be converted into a SocketAddr. This will print the panic message
-    /// 'Invalid address'.
+    /// 'Invalid address'. Also panics if the buf_size of [ServerConfig] is zero.
     ///
     /// # Examples
     ///
