@@ -1,12 +1,63 @@
 use log::{info, warn};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::network::{Network, NetworkConfig, ReadResult};
 use crate::protocol::Framing;
 use crate::protocol::Protocol;
+
+#[allow(dead_code)]
+struct ServerConfig {
+    max_clients: usize,
+    buf_size: usize,
+    timeout: Duration,
+}
+
+#[allow(dead_code)]
+struct ServerConfigBuilder {
+    max_clients: usize,
+    buf_size: usize,
+    timeout: Duration,
+}
+
+#[allow(dead_code)]
+impl ServerConfigBuilder {
+    pub fn new() -> Self {
+        Self {
+            max_clients: 100,
+            buf_size: 4096,
+            timeout: Duration::from_secs(5),
+        }
+    }
+
+    pub fn max_clients(mut self, n: usize) -> Self {
+        self.max_clients = n;
+        self
+    }
+
+    pub fn buf_size(mut self, n: usize) -> Self {
+        self.buf_size = n;
+        self
+    }
+
+    pub fn timeout(mut self, n: Duration) -> Self {
+        self.timeout = n;
+        self
+    }
+
+    pub fn build(self) -> ServerConfig {
+        assert!(self.max_clients > 0, "Max clients must be more than 0");
+        assert!(self.buf_size > 0, "Buffer size must be more than 0");
+        ServerConfig {
+            max_clients: self.max_clients,
+            buf_size: self.buf_size,
+            timeout: self.timeout,
+        }
+    }
+}
 
 /// Connects to clients and runs through event loop.
 ///
