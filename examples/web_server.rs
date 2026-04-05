@@ -11,6 +11,7 @@ async fn main() {
     let port = "127.0.0.1:8080";
 
     let config = ServerConfig::new()
+        .max_clients(25000)
         .buf_size(8192)
         .timeout(Duration::from_secs(5));
 

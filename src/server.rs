@@ -15,9 +15,9 @@ use crate::protocol::Protocol;
 /// created once when the server is initialized, and cannot change. Eventually each client will
 /// have their own configuration, allowing the user to modify it through the protocol.
 pub struct ServerConfig {
-    max_clients: usize,
     buf_size: usize,
     timeout: Duration,
+    max_clients: usize,
 }
 
 impl ServerConfig {
@@ -25,19 +25,13 @@ impl ServerConfig {
     ///
     /// Max clients defaults to 100 clients.
     /// Buffer size defaults to 4096 bytes.
-    /// Timeout defualts to 5 seconds.
+    /// Timeout defaults to 5 seconds.
     pub fn new() -> Self {
         Self {
             max_clients: 100,
             buf_size: 4096,
             timeout: Duration::from_secs(5),
         }
-    }
-
-    /// Sets max number of clients server can hold.
-    pub fn max_clients(mut self, n: usize) -> Self {
-        self.max_clients = n;
-        self
     }
 
     /// Sets buffer size for reading from network.
@@ -51,11 +45,29 @@ impl ServerConfig {
 
     /// Sets amount of time to wait for bytes from client.
     ///
-    /// This is used in conjunction with timeout() function from Tokio. It can be in any unit
-    /// supported by std::time::Duration. If the user times out, the client will be dropped. This
+    /// This is used in conjunction with 'timeout()' function from Tokio. It can be in any unit
+    /// supported by 'std::time::Duration'. If the user times out, the client will be dropped. This
     /// is important to prevent clients from staying connected while inactive.
     pub fn timeout(mut self, n: Duration) -> Self {
         self.timeout = n;
+        self
+    }
+
+    /// Sets max number of clients server will stay connected to.
+    ///
+    /// The server will update the number of current clients whenever one connects or disconnects.
+    /// If the count is at 'max_clients', any new clients are immediately dropped.
+    ///
+    /// # Performance
+    /// CPU time switching between tokio tasks will limit speed of service, with an increased time
+    /// proportional to amount of clients. Bandwith is also an important limiter, as each client
+    /// will take up a portion of total bandwidth.
+    ///
+    /// # Memory
+    /// Each connection allocates 'buf_size' plus kernel TCP overhead (4-8KB depending on OS).
+    /// Consider system RAM that can be set aside for the server when setting 'max_clients'.
+    pub fn max_clients(mut self, n: usize) -> Self {
+        self.max_clients = n;
         self
     }
 }
@@ -98,6 +110,7 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///     use std::time::Duration;
     ///
     ///     let config = polaris::ServerConfig::new()
+    ///         .max_clients(300)
     ///         .buf_size(8192)
     ///         .timeout(Duration::from_millis(3500));
     ///
@@ -140,6 +153,7 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// #[tokio::main]
     /// async fn main() {
     ///     let config = polaris::ServerConfig::new()
+    ///         .max_clients(300)
     ///         .buf_size(8192)
     ///         .timeout(Duration::from_millis(3500));
     ///
