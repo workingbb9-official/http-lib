@@ -1,8 +1,18 @@
 use super::*;
 use std::collections::HashMap;
 
-type HttpHandler = fn(&[u8]) -> HttpResponse;
+/// Function to run based on input given.
+///
+/// The bytes as input are the body from the request that was received. This can be ignored if the
+/// method or path gives enough information, since the router will already account for that when
+/// mapping to the handler. See an example in [HttpProtocol]
+pub type HttpHandler = fn(&[u8]) -> HttpResponse;
 
+/// The message formed after parsing.
+///
+/// This struct is formed straight from the raw network bytes. It is the result of the parse()
+/// method from [HttpProtocol]. Once created, it will be sent to the route() method to process
+/// the request.
 #[derive(PartialEq, Debug)]
 pub struct HttpMessage {
     method: String,
@@ -10,16 +20,32 @@ pub struct HttpMessage {
     body: Vec<u8>,
 }
 
+/// A complete Http response ready to be sent back to client.
+///
+/// This struct is the final output of the routing process. Once created, the server will serialize
+/// into raw bytes, as per HTTP/1.1 formatting. User should manually create this to match their
+/// specifications.
 pub struct HttpResponse {
+    /// The status code sent to browser.
     pub status: Status,
+    /// The connection status for browser.
     pub connection: Connection,
+    /// An optional body, along with its type.
     pub body: Option<(ContentType, Vec<u8>)>,
 }
 
+/// Represents an HTTP response status code.
+///
+/// Each variant maps to a specific status line in HTTP/1.1 protocol, such as '200 OK' or '404 Not
+/// Found'. This should be accurate for the browser to understand the purpose of the response.
 pub enum Status {
+    /// 200 OK. The request was successful.
     OK,
+    /// 204 No Content. The request was successful, but there is no data to return.
     NoContent,
+    /// 404 Not Found. The requested resource could not be found.
     NotFound,
+    /// 400 Bad Request. The request could not be parsed, likely due to malformed syntax.
     BadRequest,
 }
 
@@ -34,8 +60,20 @@ impl Status {
     }
 }
 
+/// A notification to the browser for connection handling.
+///
+/// This determines how long clients stay connected to the server. Before dropping the client, the
+/// server will inform the browser that it is about to close the connection.
 pub enum Connection {
+    /// Signals to the browser to keep the connection active.
+    ///
+    /// It is the default connection used by this implementation. KeepAlive helps to quickly send
+    /// html, css, javascript, and other data without having to waste time reconnecting.
     KeepAlive,
+    /// Signals to the browser that TCP connection should be terminated.
+    ///
+    /// This is sent by the server right before the client is dropped / disconnected. When sent, it
+    /// instructs the client that no further requests sent, and that the connection will be closed.
     Close,
 }
 
@@ -48,10 +86,18 @@ impl Connection {
     }
 }
 
+/// The type of data the body contains.
+///
+/// This must be accurate for browser to interpret correctly. Incorrect inputs can lead to
+/// malformed or unintended web pages.
 pub enum ContentType {
+    /// The body contains standard text.
     Plain,
+    /// The body contains an HTML file.
     Html,
+    /// The body contains a CSS file.
     Css,
+    /// The body contains a JavaScript file.
     JavaScript,
 }
 
@@ -66,17 +112,47 @@ impl ContentType {
     }
 }
 
+/// The core engine responsible for handling the Http lifecycle.
+///
+/// The struct itself holds a hashmap used to route messages to the inserted handlers.
+/// It also provides the logic for:
+/// 1. **Parsing** raw bytes streams into [HttpMessage] objects.
+/// 2. **Routing** those requests into the injected handlers.
+/// 3. **Serializing** the [HttpResponse] from routing into bytes in the correct Http format.
 pub struct HttpProtocol {
     routes: HashMap<String, HttpHandler>,
 }
 
 impl HttpProtocol {
+    /// Creates an empty HashMap.
+    ///
+    /// The object should be mutable to add routes.
     pub fn new() -> Self {
         Self {
             routes: HashMap::new(),
         }
     }
 
+    /// Adds a route to the hashmap.
+    ///
+    /// The route maps method + path (concatenated) to an [HttpHandler]. Every request will be
+    /// checked against the valid keys. Both method and path should be something that the browser
+    /// would send.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// fn my_handler(_: &[u8]) -> polaris::HttpResponse {
+    ///     polaris::HttpResponse {
+    ///         status: polaris::Status::OK,
+    ///         connection: polaris::Connection::KeepAlive,
+    ///         body: Some((polaris::ContentType::Plain, b"Hello from polaris".to_vec())),
+    ///     }
+    /// }
+    ///
+    /// let mut protocol = polaris::HttpProtocol::new();
+    /// protocol.add_route("GET", "/", my_handler);
+    /// ```
     pub fn add_route(&mut self, method: &str, path: &str, handler: HttpHandler) {
         let key = format!("{} {}", method, path);
         self.routes.insert(key, handler);

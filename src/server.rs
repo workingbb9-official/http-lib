@@ -8,6 +8,10 @@ use crate::network::{Network, NetworkConfig, ReadResult};
 use crate::protocol::Framing;
 use crate::protocol::Protocol;
 
+/// Connects to clients and runs through event loop.
+///
+/// Protocol stays generic, but server calls the main functions.
+/// Each connection loop: read, parse, route, serialize, send.
 pub struct Server<P: Protocol> {
     listener: TcpListener,
     config: NetworkConfig,
@@ -15,6 +19,31 @@ pub struct Server<P: Protocol> {
 }
 
 impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
+    /// Create a new server.
+    ///
+    /// This will create a tcp listener from the address string. Network config and protocol is used
+    /// for all connections.
+    ///
+    /// # Panics
+    /// If addr is not able to be converted into a SocketAddr. This will print the panic message
+    /// 'Invalid address'.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     use std::time::Duration;
+    ///
+    ///     let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
+    ///     let protocol = polaris::HttpProtocol::new();
+    ///
+    ///     // Use localhost (connect to same machine)
+    ///     let server = polaris::Server::new("127.0.0.1:0", config, protocol)
+    ///         .await
+    ///         .expect("Failed to create server");
+    /// }
+    /// ```
     pub async fn new(addr: &str, config: NetworkConfig, protocol: P) -> tokio::io::Result<Self> {
         let sock: SocketAddr = addr.parse().expect("Invalid address");
         let listener = TcpListener::bind(sock).await?;
@@ -27,17 +56,60 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     }
 
     /// Connect to clients and spawn a task.
+    ///
+    /// This starts a loop of trying to connect to a client. Calls Arc::clone() on the server and
+    /// moves the connection to the task. This keeps the server async and responsive.
+    ///
+    /// # Errors
+    /// Propagates error from accepting on TcpListener.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use std::time::Duration;
+    /// use std::sync::Arc;
+    /// use log::warn;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
+    ///     let protocol = polaris::HttpProtocol::new();
+    ///     let server = polaris::Server::new("127.0.0.1:8080", config, protocol)
+    ///         .await
+    ///         .expect("Failed to create server");
+    ///
+    ///     let server = Arc::new(server);
+    ///
+    ///     loop {
+    ///         let server_ptr = Arc::clone(&server);
+    ///         if let Err(e) = server_ptr.run().await {
+    ///             warn!("Failed to accept with error: {}", e);
+    ///         }
+    ///
+    ///         // Reaches here if a client has connected.
+    ///         println!("Client connected");
+    ///     }
+    ///
+    ///     // Go to 127.0.0.1:8080 in browser to test it.
+    /// }
+    /// ```
     pub async fn run(self: Arc<Self>) -> tokio::io::Result<()> {
-        loop {
-            let (stream, _) = self.listener.accept().await?;
+        let (stream, _) = self.listener.accept().await?;
 
-            let server_ptr = Arc::clone(&self);
-            tokio::spawn(async move {
-                server_ptr.handle_connection(stream).await;
-            });
-        }
+        let server_ptr = Arc::clone(&self);
+        tokio::spawn(async move {
+            server_ptr.handle_connection(stream).await;
+        });
+
+        Ok(())
     }
 
+    /// Access the SocketAddr the server is listening on.
+    ///
+    /// # Panics
+    /// If accessing local address of TcpListener returns error. This could happen if socket is
+    /// closed, or an OS-level error. If this happens, the server will be closed since its
+    /// listener is corrupt.
     pub fn local_addr(&self) -> SocketAddr {
         self.listener.local_addr().unwrap()
     }
@@ -63,6 +135,9 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
         }
     }
 
+    /// Reads from network and logs if message was not found.
+    /// Will reset the network buffer if bytes were written.
+    /// Mainly collects bytes and passes it to handle_frame().
     async fn net_read(&self, network: &mut Network) -> Option<Vec<u8>> {
         if let Framing::Http = self.protocol.framing() {
             return self.net_read_http(network).await;
@@ -103,6 +178,9 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
         }
     }
 
+    /// Identical to net_read(), but extra loop for Http framing.
+    /// Finds delimiter (\r\n\r\n), then content length.
+    /// Using content length, reads the rest of the data.
     async fn net_read_http(&self, network: &mut Network) -> Option<Vec<u8>> {
         loop {
             match network.read().await {
@@ -163,7 +241,7 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     }
 }
 
-// Returns index directly after delimiter.
+/// Returns index directly after delimiter.
 fn find_delimiter(buf: &[u8], delimiter: &[u8]) -> Option<usize> {
     let len = delimiter.len();
     buf.windows(len)
@@ -171,7 +249,8 @@ fn find_delimiter(buf: &[u8], delimiter: &[u8]) -> Option<usize> {
         .map(|i| i + len)
 }
 
-// Returns message and position where it ended.
+/// Returns full message and position where it ended.
+/// Will return None if not enough bytes were read, or delimiter not found.
 fn handle_frame(framing: &Framing, buf: &[u8]) -> Option<(Vec<u8>, usize)> {
     match framing {
         Framing::Delimiter(d) => {
@@ -193,6 +272,7 @@ fn handle_frame(framing: &Framing, buf: &[u8]) -> Option<(Vec<u8>, usize)> {
     }
 }
 
+/// Returns 0 if content length not found.
 fn extract_content_length(headers: &[u8]) -> usize {
     let key = b"Content-Length: ";
     let pos = match headers.windows(key.len()).position(|w| w == key) {
