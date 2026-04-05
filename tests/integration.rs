@@ -4,10 +4,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use polaris::{Connection, ContentType, HttpProtocol, HttpResponse, Status};
-use polaris::{NetworkConfig, Server};
+use polaris::{Server, ServerConfig};
 
 async fn spawn_test_server() -> SocketAddr {
-    let config = NetworkConfig::new(Duration::from_millis(100), 8192);
+    let config = ServerConfig::new()
+        .buf_size(8192)
+        .timeout(Duration::from_millis(100));
 
     let mut protocol = HttpProtocol::new();
     protocol.add_route("GET", "/", |_| HttpResponse {

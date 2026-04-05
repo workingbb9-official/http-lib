@@ -2,7 +2,7 @@ use log::warn;
 use std::{fs, sync::Arc, time::Duration};
 
 use polaris::{Connection, ContentType, HttpProtocol, HttpResponse, Status};
-use polaris::{NetworkConfig, Server};
+use polaris::{Server, ServerConfig};
 
 #[tokio::main]
 async fn main() {
@@ -10,7 +10,9 @@ async fn main() {
 
     let port = "127.0.0.1:8080";
 
-    let config = NetworkConfig::new(Duration::from_secs(5), 8192);
+    let config = ServerConfig::new()
+        .buf_size(8192)
+        .timeout(Duration::from_secs(5));
 
     let mut protocol = HttpProtocol::new();
     protocol.add_route("GET", "/", home_html);

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::network::{Network, NetworkConfig, ReadResult};
+use crate::network::{Network, ReadResult};
 use crate::protocol::Framing;
 use crate::protocol::Protocol;
 
@@ -60,10 +60,9 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// async fn main() {
     ///     use std::time::Duration;
     ///
-    ///     let config = polaris::Server::new
-    ///         .max_clients(300)
+    ///     let config = polaris::ServerConfig::new()
     ///         .buf_size(8192)
-    ///         .timeout(Duration::from_millis(3500)
+    ///         .timeout(Duration::from_millis(3500));
     ///
     ///     let protocol = polaris::HttpProtocol::new();
     ///
@@ -103,10 +102,9 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let config = polaris::ServerConfigBuilder::new
-    ///         .max_clients(300)
+    ///     let config = polaris::ServerConfig::new()
     ///         .buf_size(8192)
-    ///         .timeout(Duration::from_millis(3500)
+    ///         .timeout(Duration::from_millis(3500));
     ///
     ///     let protocol = polaris::HttpProtocol::new();
     ///     let server = polaris::Server::new("127.0.0.1:8080", config, protocol)
@@ -151,8 +149,7 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
 
     async fn handle_connection(&self, stream: TcpStream) {
         info!("Connected to client");
-        let config = NetworkConfig::new(self.config.timeout, self.config.buf_size);
-        let network = Network::new(stream, config);
+        let network = Network::new(stream, self.config.buf_size, self.config.timeout);
 
         self.connection_loop(network).await;
         info!("Dropping connection");
