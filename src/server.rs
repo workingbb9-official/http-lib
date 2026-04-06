@@ -1,12 +1,89 @@
 use log::{info, warn};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::network::{Network, NetworkConfig, ReadResult};
+use crate::network::{Network, ReadResult};
 use crate::protocol::Framing;
 use crate::protocol::Protocol;
+
+/// Configures connections for the server.
+///
+/// This struct is attached to the server and it will be used for each client. For now, it is
+/// created once when the server is initialized, and cannot change. Eventually each client will
+/// have their own configuration, allowing the user to modify it through the protocol.
+pub struct ServerConfig {
+    buf_size: usize,
+    timeout: Duration,
+    max_clients: usize,
+}
+
+impl ServerConfig {
+    /// Create config with defaults.
+    ///
+    /// Max clients defaults to 100 clients.
+    /// Buffer size defaults to 4096 bytes.
+    /// Timeout defaults to 5 seconds.
+    pub fn new() -> Self {
+        Self {
+            max_clients: 100,
+            buf_size: 4096,
+            timeout: Duration::from_secs(5),
+        }
+    }
+
+    /// Sets buffer size for reading from network.
+    ///
+    /// The network module will allocate this much upfront for each client. Size is fixed for all
+    /// clients, so ensure this is as large as the max payload the server is expected to receive.
+    pub fn buf_size(mut self, n: usize) -> Self {
+        self.buf_size = n;
+        self
+    }
+
+    /// Sets amount of time to wait for bytes from client.
+    ///
+    /// This is used in conjunction with 'timeout()' function from Tokio. It can be in any unit
+    /// supported by 'std::time::Duration'. If the user times out, the client will be dropped. This
+    /// is important to prevent clients from staying connected while inactive.
+    pub fn timeout(mut self, n: Duration) -> Self {
+        self.timeout = n;
+        self
+    }
+
+    /// Sets max number of clients server will stay connected to.
+    ///
+    /// The server will update the number of current clients whenever one connects or disconnects.
+    /// If the count is at 'max_clients', no new clients will connect until someone else
+    /// disconnects from the server.
+    ///
+    /// # Performance
+    /// CPU time switching between tokio tasks will limit speed of service, with an increased time
+    /// proportional to amount of clients. Bandwith is also an important limiter, as each client
+    /// will take up a portion of total bandwidth.
+    ///
+    /// # Memory
+    /// Each connection allocates 'buf_size' plus kernel TCP overhead (4-8KB depending on OS).
+    /// Consider system RAM that can be set aside for the server when setting 'max_clients'.
+    pub fn max_clients(mut self, n: usize) -> Self {
+        self.max_clients = n;
+        self
+    }
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            max_clients: 100,
+            buf_size: 4096,
+            timeout: Duration::from_secs(5),
+        }
+    }
+}
 
 /// Connects to clients and runs through event loop.
 ///
@@ -14,19 +91,20 @@ use crate::protocol::Protocol;
 /// Each connection loop: read, parse, route, serialize, send.
 pub struct Server<P: Protocol> {
     listener: TcpListener,
-    config: NetworkConfig,
+    config: ServerConfig,
     protocol: P,
+    clients: AtomicUsize,
 }
 
 impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// Create a new server.
     ///
-    /// This will create a tcp listener from the address string. Network config and protocol is used
-    /// for all connections.
+    /// This will create a tcp listener from the address string. Both [ServerConfig] and protocol
+    /// are used for all connections.
     ///
     /// # Panics
     /// If addr is not able to be converted into a SocketAddr. This will print the panic message
-    /// 'Invalid address'.
+    /// 'Invalid address'. Also panics if the buf_size of [ServerConfig] is zero.
     ///
     /// # Examples
     ///
@@ -35,7 +113,11 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// async fn main() {
     ///     use std::time::Duration;
     ///
-    ///     let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
+    ///     let config = polaris::ServerConfig::new()
+    ///         .max_clients(300)
+    ///         .buf_size(8192)
+    ///         .timeout(Duration::from_millis(3500));
+    ///
     ///     let protocol = polaris::HttpProtocol::new();
     ///
     ///     // Use localhost (connect to same machine)
@@ -44,7 +126,9 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///         .expect("Failed to create server");
     /// }
     /// ```
-    pub async fn new(addr: &str, config: NetworkConfig, protocol: P) -> tokio::io::Result<Self> {
+    pub async fn new(addr: &str, config: ServerConfig, protocol: P) -> tokio::io::Result<Self> {
+        assert!(config.buf_size > 0, "Buffer size must be larger than zero");
+
         let sock: SocketAddr = addr.parse().expect("Invalid address");
         let listener = TcpListener::bind(sock).await?;
 
@@ -52,13 +136,15 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
             listener,
             config,
             protocol,
+            clients: AtomicUsize::new(0),
         })
     }
 
     /// Connect to clients and spawn a task.
     ///
     /// This starts a loop of trying to connect to a client. Calls Arc::clone() on the server and
-    /// moves the connection to the task. This keeps the server async and responsive.
+    /// moves the connection to the task. This keeps the server async and responsive. Will only
+    /// accept a connection if the number of connected clients is less than 'max_clients'
     ///
     /// # Errors
     /// Propagates error from accepting on TcpListener.
@@ -72,7 +158,11 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let config = polaris::NetworkConfig::new(Duration::from_millis(3500), 4096);
+    ///     let config = polaris::ServerConfig::new()
+    ///         .max_clients(300)
+    ///         .buf_size(8192)
+    ///         .timeout(Duration::from_millis(3500));
+    ///
     ///     let protocol = polaris::HttpProtocol::new();
     ///     let server = polaris::Server::new("127.0.0.1:8080", config, protocol)
     ///         .await
@@ -94,7 +184,30 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// }
     /// ```
     pub async fn run(self: Arc<Self>) -> tokio::io::Result<()> {
-        let (stream, _) = self.listener.accept().await?;
+        let (mut stream, _) = self.listener.accept().await?;
+
+        let accepted = self
+            .clients
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| {
+                if c < self.config.max_clients {
+                    Some(c + 1)
+                } else {
+                    None
+                }
+            });
+
+        if accepted.is_err() {
+            info!("Max clients reached, rejecting connection");
+            let _ = stream.shutdown().await;
+            return Ok(());
+        }
+
+        self.clients.fetch_add(1, Ordering::Relaxed);
+        info!(
+            "Client connected ({}/{})",
+            self.clients.load(Ordering::Relaxed),
+            self.config.max_clients,
+        );
 
         let server_ptr = Arc::clone(&self);
         tokio::spawn(async move {
@@ -115,10 +228,11 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     }
 
     async fn handle_connection(&self, stream: TcpStream) {
-        info!("Connected to client");
-        let network = Network::new(stream, self.config);
+        let network = Network::new(stream, self.config.buf_size, self.config.timeout);
 
         self.connection_loop(network).await;
+
+        self.clients.fetch_sub(1, Ordering::Relaxed);
         info!("Dropping connection");
     }
 

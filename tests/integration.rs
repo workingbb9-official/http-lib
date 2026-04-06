@@ -4,10 +4,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use polaris::{Connection, ContentType, HttpProtocol, HttpResponse, Status};
-use polaris::{NetworkConfig, Server};
+use polaris::{Server, ServerConfig};
 
 async fn spawn_test_server() -> SocketAddr {
-    let config = NetworkConfig::new(Duration::from_millis(100), 8192);
+    let config = ServerConfig::new()
+        .max_clients(5)
+        .buf_size(8192)
+        .timeout(Duration::from_millis(100));
 
     let mut protocol = HttpProtocol::new();
     protocol.add_route("GET", "/", |_| HttpResponse {
@@ -23,8 +26,12 @@ async fn spawn_test_server() -> SocketAddr {
 
     let addr = server.local_addr();
 
+    let server = Arc::new(server);
+
     tokio::spawn(async move {
-        Arc::new(server).run().await.unwrap();
+        loop {
+            Arc::clone(&server).run().await.unwrap();
+        }
     });
 
     addr
@@ -71,6 +78,34 @@ async fn no_delimiter_times_out() {
 
     let mut buf = vec![0u8; 1024];
     let n = stream.read(&mut buf).await.unwrap();
+
+    assert_eq!(n, 0);
+}
+
+#[tokio::test]
+async fn server_caps_clients() {
+    let addr = spawn_test_server().await;
+
+    let mut clients = Vec::new();
+
+    for _ in 0..5 {
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        stream.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
+
+        let mut buf = vec![0u8; 1024];
+        stream.read(&mut buf).await.unwrap();
+
+        clients.push(stream);
+    }
+
+    let mut extra_client = TcpStream::connect(addr).await.unwrap();
+    extra_client
+        .write_all(b"GET / HTTP/1.1\r\n\r\n")
+        .await
+        .unwrap();
+
+    let mut buf = vec![0u8; 1024];
+    let n = extra_client.read(&mut buf).await.unwrap();
 
     assert_eq!(n, 0);
 }
