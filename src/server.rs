@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::network::{Network, ReadResult};
@@ -183,12 +184,13 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// }
     /// ```
     pub async fn run(self: Arc<Self>) -> tokio::io::Result<()> {
+        let (mut stream, _) = self.listener.accept().await?;
+
         if self.clients.load(Ordering::Relaxed) >= self.config.max_clients {
             info!("Max clients reached, rejecting connection");
+            let _ = stream.shutdown().await;
             return Ok(());
         }
-
-        let (stream, _) = self.listener.accept().await?;
 
         self.clients.fetch_add(1, Ordering::Relaxed);
         info!(
