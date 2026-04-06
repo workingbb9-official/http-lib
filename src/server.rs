@@ -186,7 +186,17 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     pub async fn run(self: Arc<Self>) -> tokio::io::Result<()> {
         let (mut stream, _) = self.listener.accept().await?;
 
-        if self.clients.load(Ordering::Relaxed) >= self.config.max_clients {
+        let accepted = self
+            .clients
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| {
+                if c < self.config.max_clients {
+                    Some(c + 1)
+                } else {
+                    None
+                }
+            });
+
+        if accepted.is_err() {
             info!("Max clients reached, rejecting connection");
             let _ = stream.shutdown().await;
             return Ok(());
