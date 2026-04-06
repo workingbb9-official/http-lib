@@ -1,6 +1,7 @@
 use log::{info, warn};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tokio::net::{TcpListener, TcpStream};
@@ -56,7 +57,8 @@ impl ServerConfig {
     /// Sets max number of clients server will stay connected to.
     ///
     /// The server will update the number of current clients whenever one connects or disconnects.
-    /// If the count is at 'max_clients', any new clients are immediately dropped.
+    /// If the count is at 'max_clients', no new clients will connect until someone else
+    /// disconnects from the server.
     ///
     /// # Performance
     /// CPU time switching between tokio tasks will limit speed of service, with an increased time
@@ -90,6 +92,7 @@ pub struct Server<P: Protocol> {
     listener: TcpListener,
     config: ServerConfig,
     protocol: P,
+    clients: AtomicUsize,
 }
 
 impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
@@ -132,13 +135,15 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
             listener,
             config,
             protocol,
+            clients: AtomicUsize::new(0),
         })
     }
 
     /// Connect to clients and spawn a task.
     ///
     /// This starts a loop of trying to connect to a client. Calls Arc::clone() on the server and
-    /// moves the connection to the task. This keeps the server async and responsive.
+    /// moves the connection to the task. This keeps the server async and responsive. Will only
+    /// accept a connection if the number of connected clients is less than 'max_clients'
     ///
     /// # Errors
     /// Propagates error from accepting on TcpListener.
@@ -178,7 +183,19 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// }
     /// ```
     pub async fn run(self: Arc<Self>) -> tokio::io::Result<()> {
+        if self.clients.load(Ordering::Relaxed) >= self.config.max_clients {
+            info!("Max clients reached, rejecting connection");
+            return Ok(());
+        }
+
         let (stream, _) = self.listener.accept().await?;
+
+        self.clients.fetch_add(1, Ordering::Relaxed);
+        info!(
+            "Client connected ({}/{})",
+            self.clients.load(Ordering::Relaxed),
+            self.config.max_clients,
+        );
 
         let server_ptr = Arc::clone(&self);
         tokio::spawn(async move {
@@ -199,10 +216,11 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     }
 
     async fn handle_connection(&self, stream: TcpStream) {
-        info!("Connected to client");
         let network = Network::new(stream, self.config.buf_size, self.config.timeout);
 
         self.connection_loop(network).await;
+
+        self.clients.fetch_sub(1, Ordering::Relaxed);
         info!("Dropping connection");
     }
 
