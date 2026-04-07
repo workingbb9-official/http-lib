@@ -26,6 +26,7 @@ pub struct HttpMessage {
 /// This struct is the final output of the routing process. Once created, the server will serialize
 /// into raw bytes, as per HTTP/1.1 formatting. User should manually create this to match their
 /// specifications.
+#[derive(PartialEq, Debug)]
 pub struct HttpResponse {
     /// The status code sent to browser.
     pub status: Status,
@@ -39,6 +40,7 @@ pub struct HttpResponse {
 ///
 /// Each variant maps to a specific status line in HTTP/1.1 protocol, such as '200 OK' or '404 Not
 /// Found'. This should be accurate for the browser to understand the purpose of the response.
+#[derive(PartialEq, Debug)]
 pub enum Status {
     /// 200 OK. The request was successful.
     OK,
@@ -68,6 +70,7 @@ impl Status {
 ///
 /// This determines how long clients stay connected to the server. Before dropping the client, the
 /// server will inform the browser that it is about to close the connection.
+#[derive(PartialEq, Debug)]
 pub enum Connection {
     /// Signals to the browser to keep the connection active.
     ///
@@ -101,6 +104,7 @@ impl Connection {
 ///
 /// This must be accurate for browser to interpret correctly. Incorrect inputs can lead to
 /// malformed or unintended web pages.
+#[derive(PartialEq, Debug)]
 pub enum ContentType {
     /// The body contains standard text.
     Plain,
@@ -410,5 +414,29 @@ mod tests {
         let result = should_upgrade(&parsed.headers);
 
         assert_eq!(result, true);
+    }
+
+    #[test]
+    fn no_key_returns_bad_request() {
+        let protocol = HttpProtocol::new();
+        let request = "\
+            GET /chat HTTP/1.1\r\n\
+            Host: example.com\r\n\
+            Upgrade: websocket\r\n\
+            Connection: Upgrade\r\n\
+            Sec-WebSocket-Version: 13\r\n\
+            \r\n";
+
+        let parsed = protocol.parse(request.as_bytes().to_vec()).unwrap();
+        let result = protocol.route(parsed);
+
+        assert_eq!(
+            result,
+            HttpResponse {
+                status: Status::BadRequest,
+                connection: Connection::Close,
+                body: None,
+            }
+        );
     }
 }
