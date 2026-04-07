@@ -48,6 +48,8 @@ pub enum Status {
     NotFound,
     /// 400 Bad Request. The request could not be parsed, likely due to malformed syntax.
     BadRequest,
+    /// 101 Switching Protocols. The server is upgrading to specified protocol.
+    SwitchingProtocol,
 }
 
 impl Status {
@@ -57,6 +59,7 @@ impl Status {
             Status::NoContent => "204 No Content",
             Status::NotFound => "404 Not Found",
             Status::BadRequest => "400 Bad Request",
+            Status::SwitchingProtocol => "101 Switching Protocols",
         }
     }
 }
@@ -76,6 +79,12 @@ pub enum Connection {
     /// This is sent by the server right before the client is dropped / disconnected. When sent, it
     /// instructs the client that no further requests sent, and that the connection will be closed.
     Close,
+    /// Signals to the browser that new protocol was acknowledged.
+    ///
+    /// This is used for upgrading to WebSocket. It should be paired with
+    /// Status::SwitchingProtocol so that all parts of the header reflect the upgrade. The String
+    /// represents key for verification with the browser.
+    Upgrade(String),
 }
 
 impl Connection {
@@ -83,6 +92,7 @@ impl Connection {
         match self {
             Connection::KeepAlive => "keep-alive",
             Connection::Close => "close",
+            Connection::Upgrade(_) => "Upgrade",
         }
     }
 }
@@ -213,6 +223,19 @@ impl Protocol for HttpProtocol {
     }
 
     fn route(&self, msg: HttpMessage) -> HttpResponse {
+        if should_upgrade(&msg.headers) {
+            if let Some(key) = msg.headers.get("sec-websocket-key") {
+                let accept_key = WebSocketProtocol::generate_accept_key(key.trim());
+                return create_upgrade_response(accept_key);
+            }
+
+            return HttpResponse {
+                status: Status::BadRequest,
+                connection: Connection::Close,
+                body: None,
+            };
+        }
+
         let key = format!("{} {}", msg.method, msg.path);
 
         if let Some(handler) = self.routes.get(&key) {
@@ -235,22 +258,39 @@ impl Protocol for HttpProtocol {
             None => ("", Vec::new()),
         };
 
-        build_response(status_str, conn_str, content_str, body)
+        let extra_headers: Option<String> = if let Connection::Upgrade(key) = response.connection {
+            Some(format!(
+                "Upgrade: WebSocket\r\n\
+                Sec-WebSocket-Accept: {key}\r\n"
+            ))
+        } else {
+            None
+        };
+
+        build_response(status_str, conn_str, content_str, extra_headers, body)
     }
 }
 
-fn build_response(status: &str, conn: &str, content_type: &str, body: Vec<u8>) -> Vec<u8> {
+fn build_response(
+    status: &str,
+    conn: &str,
+    content_type: &str,
+    headers: Option<String>,
+    body: Vec<u8>,
+) -> Vec<u8> {
     let header = format!(
         "HTTP/1.1 {}\r\n\
-            Content-Security-Policy: default-src 'self'; script-src 'self';\r\n\
-            Content-Length: {}\r\n\
-            Content-Type: {}\r\n\
-            Connection: {}\r\n\
-            \r\n",
+        Content-Security-Policy: default-src 'self'; script-src 'self';\r\n\
+        Content-Length: {}\r\n\
+        Content-Type: {}\r\n\
+        Connection: {}\r\n\
+        \r\n
+        {}",
         status,
         body.len(),
         content_type,
         conn,
+        headers.unwrap_or("".to_string()),
     );
 
     let mut final_response = header.into_bytes();
@@ -281,18 +321,23 @@ fn url_decode(input: &str) -> String {
     result
 }
 
-#[allow(dead_code)]
-fn should_upgrade_to_web_sockets(headers: &HashMap<String, String>) -> bool {
+fn should_upgrade(headers: &HashMap<String, String>) -> bool {
     headers
         .get("connection")
-        .map(|v| v.eq_ignore_ascii_case("upgrade"))
-        .unwrap_or(false);
-    headers
-        .get("upgrade")
-        .map(|v| v.eq_ignore_ascii_case("websockets"))
-        .unwrap_or(false);
+        .map(|v| v.to_lowercase().contains("upgrade"))
+        .unwrap_or(false)
+        && headers
+            .get("upgrade")
+            .map(|v| v.to_lowercase().contains("websocket"))
+            .unwrap_or(false)
+}
 
-    true
+fn create_upgrade_response(key: String) -> HttpResponse {
+    HttpResponse {
+        status: Status::SwitchingProtocol,
+        connection: Connection::Upgrade(key),
+        body: None,
+    }
 }
 
 #[cfg(test)]
@@ -362,7 +407,7 @@ mod tests {
             \r\n";
 
         let parsed = protocol.parse(request.as_bytes().to_vec()).unwrap();
-        let result = should_upgrade_to_web_sockets(&parsed.headers);
+        let result = should_upgrade(&parsed.headers);
 
         assert_eq!(result, true);
     }

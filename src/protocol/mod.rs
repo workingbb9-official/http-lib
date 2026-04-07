@@ -1,10 +1,13 @@
 mod http;
-mod web_sockets;
+mod web_socket;
+
 pub use http::HttpHandler;
 pub use http::HttpMessage;
 pub use http::HttpProtocol;
 pub use http::HttpResponse;
 pub use http::{Connection, ContentType, Status};
+
+pub use web_socket::WebSocketProtocol;
 
 /// Custom protocol implementation.
 ///
