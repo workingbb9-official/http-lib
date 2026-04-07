@@ -17,7 +17,17 @@ pub type HttpHandler = fn(&[u8]) -> HttpResponse;
 pub struct HttpMessage {
     method: String,
     path: String,
+    headers: HashMap<String, String>,
     body: Vec<u8>,
+}
+
+impl HttpMessage {
+    fn header_contains(&self, key: &str, value: &str) -> bool {
+        self.headers
+            .get(key)
+            .map(|v| v.to_lowercase().contains(&value.to_lowercase()))
+            .unwrap_or(false)
+    }
 }
 
 /// A complete Http response ready to be sent back to client.
@@ -25,6 +35,7 @@ pub struct HttpMessage {
 /// This struct is the final output of the routing process. Once created, the server will serialize
 /// into raw bytes, as per HTTP/1.1 formatting. User should manually create this to match their
 /// specifications.
+#[derive(PartialEq, Debug)]
 pub struct HttpResponse {
     /// The status code sent to browser.
     pub status: Status,
@@ -38,6 +49,7 @@ pub struct HttpResponse {
 ///
 /// Each variant maps to a specific status line in HTTP/1.1 protocol, such as '200 OK' or '404 Not
 /// Found'. This should be accurate for the browser to understand the purpose of the response.
+#[derive(PartialEq, Debug)]
 pub enum Status {
     /// 200 OK. The request was successful.
     OK,
@@ -47,6 +59,8 @@ pub enum Status {
     NotFound,
     /// 400 Bad Request. The request could not be parsed, likely due to malformed syntax.
     BadRequest,
+    /// 101 Switching Protocols. The server is upgrading to specified protocol.
+    SwitchingProtocol,
 }
 
 impl Status {
@@ -56,6 +70,7 @@ impl Status {
             Status::NoContent => "204 No Content",
             Status::NotFound => "404 Not Found",
             Status::BadRequest => "400 Bad Request",
+            Status::SwitchingProtocol => "101 Switching Protocols",
         }
     }
 }
@@ -64,6 +79,7 @@ impl Status {
 ///
 /// This determines how long clients stay connected to the server. Before dropping the client, the
 /// server will inform the browser that it is about to close the connection.
+#[derive(PartialEq, Debug)]
 pub enum Connection {
     /// Signals to the browser to keep the connection active.
     ///
@@ -75,6 +91,12 @@ pub enum Connection {
     /// This is sent by the server right before the client is dropped / disconnected. When sent, it
     /// instructs the client that no further requests sent, and that the connection will be closed.
     Close,
+    /// Signals to the browser that new protocol was acknowledged.
+    ///
+    /// This is used for upgrading to WebSocket. It should be paired with
+    /// Status::SwitchingProtocol so that all parts of the header reflect the upgrade. The String
+    /// represents key for verification with the browser.
+    Upgrade(String),
 }
 
 impl Connection {
@@ -82,6 +104,7 @@ impl Connection {
         match self {
             Connection::KeepAlive => "keep-alive",
             Connection::Close => "close",
+            Connection::Upgrade(_) => "Upgrade",
         }
     }
 }
@@ -90,6 +113,7 @@ impl Connection {
 ///
 /// This must be accurate for browser to interpret correctly. Incorrect inputs can lead to
 /// malformed or unintended web pages.
+#[derive(PartialEq, Debug)]
 pub enum ContentType {
     /// The body contains standard text.
     Plain,
@@ -175,23 +199,36 @@ impl Protocol for HttpProtocol {
 
     fn parse(&self, raw: Vec<u8>) -> Option<HttpMessage> {
         let request = String::from_utf8(raw).ok()?;
-        let mut parts = request.splitn(2, "\r\n\r\n");
-        let headers = parts.next()?;
 
+        // Split into headers and body
+        let mut parts = request.splitn(2, "\r\n\r\n");
+
+        let mut header_lines = parts.next()?.lines();
+
+        // Parse request line
+        let first_line = header_lines.next()?;
+        let mut tokens = first_line.split_whitespace();
+        let method = tokens.next()?.to_string();
+        let path = tokens.next()?.to_string();
+        let _version = tokens.next()?;
+
+        // Parse headers
+        let mut headers = HashMap::new();
+        for line in header_lines {
+            if let Some((key, value)) = line.split_once(':') {
+                headers.insert(key.trim().to_lowercase(), value.trim().to_string());
+            }
+        }
+
+        // Parse body
         let value = url_decode(parts.next().unwrap_or(""));
         let body_str = value.split_once('=').map(|x| x.1).unwrap_or(&value);
         let body = body_str.as_bytes().to_vec();
 
-        let first_line = headers.lines().next()?;
-        let mut tokens = first_line.split_whitespace();
-
-        let method = tokens.next()?;
-        let path = tokens.next()?;
-        let _version = tokens.next()?;
-
         let http_req = HttpMessage {
-            method: method.to_string(),
-            path: path.to_string(),
+            method,
+            path,
+            headers,
             body,
         };
 
@@ -199,6 +236,20 @@ impl Protocol for HttpProtocol {
     }
 
     fn route(&self, msg: HttpMessage) -> HttpResponse {
+        if should_upgrade(&msg) {
+            if !is_valid_upgrade_request(&msg) {
+                return HttpResponse {
+                    status: Status::BadRequest,
+                    connection: Connection::Close,
+                    body: None,
+                };
+            };
+
+            let key = msg.headers.get("sec-websocket-key").expect("Parse failure");
+            let accept_key = WebSocketProtocol::generate_accept_key(key.trim());
+            return create_upgrade_response(accept_key);
+        }
+
         let key = format!("{} {}", msg.method, msg.path);
 
         if let Some(handler) = self.routes.get(&key) {
@@ -221,22 +272,39 @@ impl Protocol for HttpProtocol {
             None => ("", Vec::new()),
         };
 
-        build_response(status_str, conn_str, content_str, body)
+        let extra_headers: Option<String> = if let Connection::Upgrade(key) = response.connection {
+            Some(format!(
+                "Upgrade: WebSocket\r\n\
+                Sec-WebSocket-Accept: {key}\r\n"
+            ))
+        } else {
+            None
+        };
+
+        build_response(status_str, conn_str, content_str, extra_headers, body)
     }
 }
 
-fn build_response(status: &str, conn: &str, content_type: &str, body: Vec<u8>) -> Vec<u8> {
+fn build_response(
+    status: &str,
+    conn: &str,
+    content_type: &str,
+    headers: Option<String>,
+    body: Vec<u8>,
+) -> Vec<u8> {
     let header = format!(
         "HTTP/1.1 {}\r\n\
-            Content-Security-Policy: default-src 'self'; script-src 'self';\r\n\
-            Content-Length: {}\r\n\
-            Content-Type: {}\r\n\
-            Connection: {}\r\n\
-            \r\n",
+        Content-Security-Policy: default-src 'self'; script-src 'self';\r\n\
+        Content-Length: {}\r\n\
+        Content-Type: {}\r\n\
+        Connection: {}\r\n\
+        {}
+        \r\n",
         status,
         body.len(),
         content_type,
         conn,
+        headers.unwrap_or("".to_string()),
     );
 
     let mut final_response = header.into_bytes();
@@ -267,6 +335,25 @@ fn url_decode(input: &str) -> String {
     result
 }
 
+fn should_upgrade(msg: &HttpMessage) -> bool {
+    msg.header_contains("connection", "upgrade") && msg.header_contains("upgrade", "websocket")
+}
+
+fn is_valid_upgrade_request(msg: &HttpMessage) -> bool {
+    msg.method == "GET"
+        && msg.headers.contains_key("host")
+        && msg.headers.contains_key("sec-websocket-key")
+        && msg.header_contains("sec-websocket-version", "13")
+}
+
+fn create_upgrade_response(key: String) -> HttpResponse {
+    HttpResponse {
+        status: Status::SwitchingProtocol,
+        connection: Connection::Upgrade(key),
+        body: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +369,7 @@ mod tests {
                 method: "GET".to_string(),
                 path: "/test".to_string(),
                 body: Vec::new(),
+                headers: HashMap::new(),
             })
         );
     }
@@ -297,6 +385,7 @@ mod tests {
                 method: "POST".to_string(),
                 path: "/".to_string(),
                 body: Vec::new(),
+                headers: HashMap::new(),
             })
         );
     }
@@ -317,5 +406,47 @@ mod tests {
         let result = protocol.parse(b"GET HTTP/1.1\r\n".to_vec());
 
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn upgrade_to_web_sockets_detected() {
+        let protocol = HttpProtocol::new();
+        let request = "\
+            GET /chat HTTP/1.1\r\n\
+            Host: example.com\r\n\
+            Upgrade: websocket\r\n\
+            Connection: Upgrade\r\n\
+            Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+            Sec-WebSocket-Version: 13\r\n\
+            \r\n";
+
+        let parsed = protocol.parse(request.as_bytes().to_vec()).unwrap();
+        let result = should_upgrade(&parsed);
+
+        assert_eq!(result, true);
+    }
+
+    #[test]
+    fn no_key_returns_bad_request() {
+        let protocol = HttpProtocol::new();
+        let request = "\
+            GET /chat HTTP/1.1\r\n\
+            Host: example.com\r\n\
+            Upgrade: websocket\r\n\
+            Connection: Upgrade\r\n\
+            Sec-WebSocket-Version: 13\r\n\
+            \r\n";
+
+        let parsed = protocol.parse(request.as_bytes().to_vec()).unwrap();
+        let result = protocol.route(parsed);
+
+        assert_eq!(
+            result,
+            HttpResponse {
+                status: Status::BadRequest,
+                connection: Connection::Close,
+                body: None,
+            }
+        );
     }
 }

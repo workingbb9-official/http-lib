@@ -109,3 +109,31 @@ async fn server_caps_clients() {
 
     assert_eq!(n, 0);
 }
+
+#[tokio::test]
+async fn web_socket_upgrade() {
+    let addr = spawn_test_server().await;
+
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    stream
+        .write_all(
+            b"GET / HTTP/1.1\r\n\
+        Host: localhost\r\n\
+        Upgrade: websocket\r\n\
+        Connection: Upgrade\r\n\
+        Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+        Sec-WebSocket-Version: 13\r\n\
+        \r\n",
+        )
+        .await
+        .unwrap();
+
+    let mut buf = vec![0u8; 1024];
+    let n = stream.read(&mut buf).await.unwrap();
+    let response = String::from_utf8_lossy(&buf[..n]);
+
+    assert!(response.contains("Switching Protocols"));
+    assert!(response.contains("Connection: Upgrade"));
+    assert!(response.contains("Upgrade: WebSocket"));
+    assert!(response.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
+}
