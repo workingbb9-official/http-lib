@@ -1,6 +1,73 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::time::{Duration, timeout};
+
+#[allow(dead_code)]
+pub(crate) struct Reader {
+    stream: OwnedReadHalf,
+    buf: NetworkBuffer,
+    timeout: Duration,
+}
+
+#[allow(dead_code)]
+impl Reader {
+    pub(crate) fn new(stream: OwnedReadHalf, buf_size: usize, timeout: Duration) -> Self {
+        Self {
+            stream,
+            buf: NetworkBuffer::new(buf_size),
+            timeout,
+        }
+    }
+
+    pub(crate) async fn read(&mut self) -> ReadResult {
+        // Read from free buffer space, limit to timeout length.
+        let n = match timeout(
+            self.timeout,
+            self.stream.read(&mut self.buf.storage[self.buf.filled..]),
+        )
+        .await
+        {
+            Ok(Err(_)) => return ReadResult::IoError,
+            Err(_) => return ReadResult::Timeout,
+            Ok(Ok(0)) => return ReadResult::NoData,
+            Ok(Ok(n)) => n,
+        };
+
+        if self.buf.filled + n == self.buf.storage.len() {
+            self.buf.filled += n;
+            return ReadResult::BufferFull;
+        }
+
+        self.buf.filled += n;
+        ReadResult::Data
+    }
+
+    #[inline]
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.buf.storage[..self.buf.filled]
+    }
+
+    #[inline]
+    pub(crate) fn reset(&mut self, pos: usize) {
+        self.buf.shift(pos);
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) struct Writer {
+    stream: OwnedWriteHalf,
+}
+
+#[allow(dead_code)]
+impl Writer {
+    pub(crate) async fn write(&mut self, data: &[u8]) -> tokio::io::Result<()> {
+        self.stream.write_all(data).await?;
+        self.stream.flush().await?;
+
+        Ok(())
+    }
+}
 
 pub(crate) struct Network {
     stream: TcpStream,
