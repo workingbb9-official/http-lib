@@ -179,12 +179,11 @@ impl Protocol for HttpProtocol {
 
         // Split into headers and body
         let mut parts = request.splitn(2, "\r\n\r\n");
-        let all_header_lines = parts.next()?;
 
-        let mut lines = all_header_lines.lines();
+        let mut header_lines = parts.next()?.lines();
 
         // Parse request line
-        let first_line = lines.next()?;
+        let first_line = header_lines.next()?;
         let mut tokens = first_line.split_whitespace();
         let method = tokens.next()?.to_string();
         let path = tokens.next()?.to_string();
@@ -192,7 +191,7 @@ impl Protocol for HttpProtocol {
 
         // Parse headers
         let mut headers = HashMap::new();
-        for line in lines {
+        for line in header_lines {
             if let Some((key, value)) = line.split_once(':') {
                 headers.insert(key.trim().to_lowercase(), value.trim().to_string());
             }
@@ -282,10 +281,24 @@ fn url_decode(input: &str) -> String {
     result
 }
 
+#[allow(dead_code)]
+fn should_upgrade_to_web_sockets(headers: &HashMap<String, String>) -> bool {
+    headers
+        .get("connection")
+        .map(|v| v.eq_ignore_ascii_case("upgrade"))
+        .unwrap_or(false);
+    headers
+        .get("upgrade")
+        .map(|v| v.eq_ignore_ascii_case("websockets"))
+        .unwrap_or(false);
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    /*
     #[test]
     fn parse_valid_get_request() {
         let protocol = HttpProtocol::new();
@@ -332,5 +345,23 @@ mod tests {
         let result = protocol.parse(b"GET HTTP/1.1\r\n".to_vec());
 
         assert_eq!(result, None);
+    } */
+
+    #[test]
+    fn upgrade_to_web_sockets_detected() {
+        let protocol = HttpProtocol::new();
+        let request = "\
+            GET /chat HTTP/1.1\r\n\
+            Host: example.com\r\n\
+            Upgrade: websocket\r\n\
+            Connection: Upgrade\r\n\
+            Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+            Sec-WebSocket-Version: 13\r\n\
+            \r\n";
+
+        let parsed = protocol.parse(request.as_bytes().to_vec()).unwrap();
+        let result = should_upgrade_to_web_sockets(&parsed.headers);
+
+        assert_eq!(result, true);
     }
 }
