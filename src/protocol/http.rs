@@ -284,8 +284,8 @@ fn build_response(
         Content-Length: {}\r\n\
         Content-Type: {}\r\n\
         Connection: {}\r\n\
-        \r\n
-        {}",
+        {}
+        \r\n",
         status,
         body.len(),
         content_type,
