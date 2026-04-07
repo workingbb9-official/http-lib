@@ -17,6 +17,7 @@ pub type HttpHandler = fn(&[u8]) -> HttpResponse;
 pub struct HttpMessage {
     method: String,
     path: String,
+    headers: HashMap<String, String>,
     body: Vec<u8>,
 }
 
@@ -175,23 +176,37 @@ impl Protocol for HttpProtocol {
 
     fn parse(&self, raw: Vec<u8>) -> Option<HttpMessage> {
         let request = String::from_utf8(raw).ok()?;
-        let mut parts = request.splitn(2, "\r\n\r\n");
-        let headers = parts.next()?;
 
+        // Split into headers and body
+        let mut parts = request.splitn(2, "\r\n\r\n");
+        let all_header_lines = parts.next()?;
+
+        let mut lines = all_header_lines.lines();
+
+        // Parse request line
+        let first_line = lines.next()?;
+        let mut tokens = first_line.split_whitespace();
+        let method = tokens.next()?.to_string();
+        let path = tokens.next()?.to_string();
+        let _version = tokens.next()?;
+
+        // Parse headers
+        let mut headers = HashMap::new();
+        for line in lines {
+            if let Some((key, value)) = line.split_once(':') {
+                headers.insert(key.trim().to_lowercase(), value.trim().to_string());
+            }
+        }
+
+        // Parse body
         let value = url_decode(parts.next().unwrap_or(""));
         let body_str = value.split_once('=').map(|x| x.1).unwrap_or(&value);
         let body = body_str.as_bytes().to_vec();
 
-        let first_line = headers.lines().next()?;
-        let mut tokens = first_line.split_whitespace();
-
-        let method = tokens.next()?;
-        let path = tokens.next()?;
-        let _version = tokens.next()?;
-
         let http_req = HttpMessage {
-            method: method.to_string(),
-            path: path.to_string(),
+            method,
+            path,
+            headers,
             body,
         };
 
