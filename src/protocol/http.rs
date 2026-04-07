@@ -298,7 +298,7 @@ fn should_upgrade_to_web_sockets(headers: &HashMap<String, String>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /*
+
     #[test]
     fn parse_valid_get_request() {
         let protocol = HttpProtocol::new();
@@ -310,6 +310,7 @@ mod tests {
                 method: "GET".to_string(),
                 path: "/test".to_string(),
                 body: Vec::new(),
+                headers: HashMap::new(),
             })
         );
     }
@@ -325,6 +326,7 @@ mod tests {
                 method: "POST".to_string(),
                 path: "/".to_string(),
                 body: Vec::new(),
+                headers: HashMap::new(),
             })
         );
     }
@@ -345,7 +347,7 @@ mod tests {
         let result = protocol.parse(b"GET HTTP/1.1\r\n".to_vec());
 
         assert_eq!(result, None);
-    } */
+    }
 
     #[test]
     fn upgrade_to_web_sockets_detected() {
