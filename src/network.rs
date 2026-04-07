@@ -123,6 +123,12 @@ impl Network {
     pub(crate) fn reset(&mut self, pos: usize) {
         self.buf.shift(pos);
     }
+
+    #[allow(dead_code)]
+    #[inline]
+    pub(crate) fn move_stream(self) -> TcpStream {
+        self.stream
+    }
 }
 
 pub(crate) enum ReadResult {
