@@ -115,14 +115,18 @@ async fn web_socket_upgrade() {
     let addr = spawn_test_server().await;
 
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    stream.write_all(b"GET / HTTP/1.1\r\n\
+    stream
+        .write_all(
+            b"GET / HTTP/1.1\r\n\
         Host: localhost\r\n\
         Upgrade: websocket\r\n\
         Connection: Upgrade\r\n\
         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
         Sec-WebSocket-Version: 13\r\n\
-        \r\n"
-    ).await.unwrap();
+        \r\n",
+        )
+        .await
+        .unwrap();
 
     let mut buf = vec![0u8; 1024];
     let n = stream.read(&mut buf).await.unwrap();

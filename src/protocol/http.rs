@@ -21,6 +21,15 @@ pub struct HttpMessage {
     body: Vec<u8>,
 }
 
+impl HttpMessage {
+    fn header_contains(&self, key: &str, value: &str) -> bool {
+        self.headers
+            .get(key)
+            .map(|v| v.to_lowercase().contains(&value.to_lowercase()))
+            .unwrap_or(false)
+    }
+}
+
 /// A complete Http response ready to be sent back to client.
 ///
 /// This struct is the final output of the routing process. Once created, the server will serialize
@@ -227,17 +236,18 @@ impl Protocol for HttpProtocol {
     }
 
     fn route(&self, msg: HttpMessage) -> HttpResponse {
-        if should_upgrade(&msg.headers) {
-            if let Some(key) = msg.headers.get("sec-websocket-key") {
-                let accept_key = WebSocketProtocol::generate_accept_key(key.trim());
-                return create_upgrade_response(accept_key);
-            }
-
-            return HttpResponse {
-                status: Status::BadRequest,
-                connection: Connection::Close,
-                body: None,
+        if should_upgrade(&msg) {
+            if !is_valid_upgrade_request(&msg) {
+                return HttpResponse {
+                    status: Status::BadRequest,
+                    connection: Connection::Close,
+                    body: None,
+                };
             };
+
+            let key = msg.headers.get("sec-websocket-key").expect("Parse failure");
+            let accept_key = WebSocketProtocol::generate_accept_key(key.trim());
+            return create_upgrade_response(accept_key);
         }
 
         let key = format!("{} {}", msg.method, msg.path);
@@ -325,15 +335,14 @@ fn url_decode(input: &str) -> String {
     result
 }
 
-fn should_upgrade(headers: &HashMap<String, String>) -> bool {
-    headers
-        .get("connection")
-        .map(|v| v.to_lowercase().contains("upgrade"))
-        .unwrap_or(false)
-        && headers
-            .get("upgrade")
-            .map(|v| v.to_lowercase().contains("websocket"))
-            .unwrap_or(false)
+fn should_upgrade(msg: &HttpMessage) -> bool {
+    msg.header_contains("connection", "upgrade") && msg.header_contains("upgrade", "websocket")
+}
+
+fn is_valid_upgrade_request(msg: &HttpMessage) -> bool {
+    msg.method == "GET"
+        && msg.headers.contains_key("host")
+        && msg.headers.contains_key("sec-websocket-key")
 }
 
 fn create_upgrade_response(key: String) -> HttpResponse {
@@ -411,7 +420,7 @@ mod tests {
             \r\n";
 
         let parsed = protocol.parse(request.as_bytes().to_vec()).unwrap();
-        let result = should_upgrade(&parsed.headers);
+        let result = should_upgrade(&parsed);
 
         assert_eq!(result, true);
     }
