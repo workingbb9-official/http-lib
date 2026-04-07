@@ -202,7 +202,6 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
             return Ok(());
         }
 
-        self.clients.fetch_add(1, Ordering::Relaxed);
         info!(
             "Client connected ({}/{})",
             self.clients.load(Ordering::Relaxed),
