@@ -1,4 +1,5 @@
 mod http;
+mod web_sockets;
 pub use http::HttpHandler;
 pub use http::HttpMessage;
 pub use http::HttpProtocol;
