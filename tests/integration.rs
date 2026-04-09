@@ -3,8 +3,8 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use polaris::{Connection, ContentType, HttpProtocol, HttpResponse, Status};
-use polaris::{Server, ServerConfig};
+use http_lib::{Connection, ContentType, HttpProtocol, HttpResponse, Status};
+use http_lib::{Server, ServerConfig};
 
 async fn spawn_test_server() -> SocketAddr {
     let config = ServerConfig::new()

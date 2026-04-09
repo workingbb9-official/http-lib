@@ -166,15 +166,15 @@ impl HttpProtocol {
     /// # Examples
     ///
     /// ```
-    /// fn my_handler(_: &[u8]) -> polaris::HttpResponse {
-    ///     polaris::HttpResponse {
-    ///         status: polaris::Status::OK,
-    ///         connection: polaris::Connection::KeepAlive,
-    ///         body: Some((polaris::ContentType::Plain, b"Hello from polaris".to_vec())),
+    /// fn my_handler(_: &[u8]) -> http_lib::HttpResponse {
+    ///     http_lib::HttpResponse {
+    ///         status: http_lib::Status::OK,
+    ///         connection: http_lib::Connection::KeepAlive,
+    ///         body: Some((http_lib::ContentType::Plain, b"Hello from http_lib".to_vec())),
     ///     }
     /// }
     ///
-    /// let mut protocol = polaris::HttpProtocol::new();
+    /// let mut protocol = http_lib::HttpProtocol::new();
     /// protocol.add_route("GET", "/", my_handler);
     /// ```
     pub fn add_route(&mut self, method: &str, path: &str, handler: HttpHandler) {

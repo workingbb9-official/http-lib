@@ -1,8 +1,8 @@
 use log::warn;
 use std::{fs, sync::Arc, time::Duration};
 
-use polaris::{Connection, ContentType, HttpProtocol, HttpResponse, Status};
-use polaris::{Server, ServerConfig};
+use http_lib::{Connection, ContentType, HttpProtocol, HttpResponse, Status};
+use http_lib::{Server, ServerConfig};
 
 #[tokio::main]
 async fn main() {

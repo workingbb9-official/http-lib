@@ -173,6 +173,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-lib"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "env_logger",
+ "log",
+ "sha1",
+ "tokio",
+ "trait-variant",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -274,18 +286,6 @@ name = "pin-project-lite"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
-
-[[package]]
-name = "polaris"
-version = "0.1.0"
-dependencies = [
- "base64",
- "env_logger",
- "log",
- "sha1",
- "tokio",
- "trait-variant",
-]
 
 [[package]]
 name = "portable-atomic"

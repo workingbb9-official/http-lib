@@ -113,15 +113,15 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     /// async fn main() {
     ///     use std::time::Duration;
     ///
-    ///     let config = polaris::ServerConfig::new()
+    ///     let config = http_lib::ServerConfig::new()
     ///         .max_clients(300)
     ///         .buf_size(8192)
     ///         .timeout(Duration::from_millis(3500));
     ///
-    ///     let protocol = polaris::HttpProtocol::new();
+    ///     let protocol = http_lib::HttpProtocol::new();
     ///
     ///     // Use localhost (connect to same machine)
-    ///     let server = polaris::Server::new("127.0.0.1:0", config, protocol)
+    ///     let server = http_lib::Server::new("127.0.0.1:0", config, protocol)
     ///         .await
     ///         .expect("Failed to create server");
     /// }
@@ -158,13 +158,13 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let config = polaris::ServerConfig::new()
+    ///     let config = http_lib::ServerConfig::new()
     ///         .max_clients(300)
     ///         .buf_size(8192)
     ///         .timeout(Duration::from_millis(3500));
     ///
-    ///     let protocol = polaris::HttpProtocol::new();
-    ///     let server = polaris::Server::new("127.0.0.1:8080", config, protocol)
+    ///     let protocol = http_lib::HttpProtocol::new();
+    ///     let server = http_lib::Server::new("127.0.0.1:8080", config, protocol)
     ///         .await
     ///         .expect("Failed to create server");
     ///
