@@ -1,1 +1,1 @@
-# Polaris - Minimal, low-level server written in Rust
+# http-lib - Minimal, low-level http server api written in Rust using Tokio
