@@ -12,8 +12,8 @@ async fn spawn_test_server() -> SocketAddr {
         .buf_size(8192)
         .timeout(Duration::from_millis(100));
 
-    let mut protocol = HttpProtocol::new();
-    protocol.add_route("GET", "/", |_| HttpResponse {
+    let mut protocol = HttpProtocol::new(None::<()>);
+    protocol.add_route("GET", "/", |_, _| HttpResponse {
         status: Status::OK,
         connection: Connection::KeepAlive,
         body: Some((ContentType::Plain, b"hello".to_vec())),

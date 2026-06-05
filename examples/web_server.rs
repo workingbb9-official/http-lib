@@ -1,5 +1,6 @@
 use log::warn;
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, time::Duration};
+use std::sync::{Arc, Mutex};
 
 use http_lib::{Connection, ContentType, HttpProtocol, HttpResponse, Status};
 use http_lib::{Server, ServerConfig};
@@ -7,6 +8,10 @@ use http_lib::{Server, ServerConfig};
 #[tokio::main]
 async fn main() {
     env_logger::init();
+    let state = AppState {
+        home_visitors: Mutex::new(0),
+        about_visitors: Mutex::new(0),
+    };
 
     let port = "127.0.0.1:8080";
 
@@ -15,7 +20,7 @@ async fn main() {
         .buf_size(8192)
         .timeout(Duration::from_secs(5));
 
-    let mut protocol = HttpProtocol::new();
+    let mut protocol = HttpProtocol::new(Some(state));
     protocol.add_route("GET", "/", home_html);
     protocol.add_route("GET", "/style.css", home_css);
     protocol.add_route("GET", "/script.js", home_js);
@@ -29,22 +34,26 @@ async fn main() {
         .expect("Failed to create server");
 
     let server = Arc::new(server);
-    let mut count = 0;
 
     loop {
         let server_ptr = Arc::clone(&server);
         if let Err(e) = server_ptr.run().await {
             warn!("Failed to accept with error: {}", e);
         }
-
-        count += 1;
-        if count % 10 == 0 {
-            println!("Total visits: {count}");
-        }
     }
 }
 
-fn home_html(_: &[u8]) -> HttpResponse {
+struct AppState {
+    home_visitors: Mutex<usize>,
+    about_visitors: Mutex<usize>,
+}
+
+fn home_html(_: &[u8], state: Option<&Arc<AppState>>) -> HttpResponse {
+    if let Some(s) = state {
+        let mut guard = s.home_visitors.lock().unwrap();
+        *guard += 1;
+    }
+
     let bytes = fs::read("examples/static/index.html").unwrap();
     HttpResponse {
         status: Status::OK,
@@ -53,7 +62,7 @@ fn home_html(_: &[u8]) -> HttpResponse {
     }
 }
 
-fn home_css(_: &[u8]) -> HttpResponse {
+fn home_css(_: &[u8], _: Option<&Arc<AppState>>) -> HttpResponse {
     let bytes = fs::read("examples/static/style.css").unwrap();
     HttpResponse {
         status: Status::OK,
@@ -62,7 +71,7 @@ fn home_css(_: &[u8]) -> HttpResponse {
     }
 }
 
-fn home_js(_: &[u8]) -> HttpResponse {
+fn home_js(_: &[u8], _: Option<&Arc<AppState>>) -> HttpResponse {
     let bytes = fs::read("examples/static/script.js").unwrap();
     HttpResponse {
         status: Status::OK,
@@ -71,7 +80,12 @@ fn home_js(_: &[u8]) -> HttpResponse {
     }
 }
 
-fn about_html(_: &[u8]) -> HttpResponse {
+fn about_html(_: &[u8], state: Option<&Arc<AppState>>) -> HttpResponse {
+    if let Some(s) = state {
+        let mut guard = s.about_visitors.lock().unwrap();
+        *guard += 1;
+    }
+
     let bytes = fs::read("examples/static/about.html").unwrap();
     HttpResponse {
         status: Status::OK,
@@ -80,7 +94,7 @@ fn about_html(_: &[u8]) -> HttpResponse {
     }
 }
 
-fn about_js(_: &[u8]) -> HttpResponse {
+fn about_js(_: &[u8], _: Option<&Arc<AppState>>) -> HttpResponse {
     let bytes = fs::read("examples/static/about.js").unwrap();
     HttpResponse {
         status: Status::OK,
@@ -89,7 +103,7 @@ fn about_js(_: &[u8]) -> HttpResponse {
     }
 }
 
-fn post_html(_: &[u8]) -> HttpResponse {
+fn post_html(_: &[u8], _: Option<&Arc<AppState>>) -> HttpResponse {
     let bytes = fs::read("examples/static/post.html").unwrap();
     HttpResponse {
         status: Status::OK,
@@ -98,7 +112,7 @@ fn post_html(_: &[u8]) -> HttpResponse {
     }
 }
 
-fn display_post(body: &[u8]) -> HttpResponse {
+fn display_post(body: &[u8], _: Option<&Arc<AppState>>) -> HttpResponse {
     let sanitized: String = body
         .iter()
         .map(|&b| if b.is_ascii_control() { '.' } else { b as char })

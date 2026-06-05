@@ -1,12 +1,15 @@
 use super::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Function to run based on input given.
 ///
 /// The bytes as input are the body from the request that was received. This can be ignored if the
 /// method or path gives enough information, since the router will already account for that when
-/// mapping to the handler. See an example in [HttpProtocol]
-pub type HttpHandler = fn(&[u8]) -> HttpResponse;
+/// mapping to the handler. State can be passed in optionally to connect the handler to the overall
+/// application. Must be connected with protocol initialization. If there is no state, the
+/// parameter should be set to 'Option<&Arc<()>>'. See an example in [HttpProtocol].
+pub type HttpHandler<State> = fn(&[u8], Option<&Arc<State>>) -> HttpResponse;
 
 /// The message formed after parsing.
 ///
@@ -143,17 +146,20 @@ impl ContentType {
 /// 1. **Parsing** raw bytes streams into [HttpMessage] objects.
 /// 2. **Routing** those requests into the injected handlers.
 /// 3. **Serializing** the [HttpResponse] from routing into bytes in the correct Http format.
-pub struct HttpProtocol {
-    routes: HashMap<String, HttpHandler>,
+pub struct HttpProtocol<State> {
+    routes: HashMap<String, HttpHandler<State>>,
+    state: Option<Arc<State>>,
 }
 
-impl HttpProtocol {
-    /// Creates an empty HashMap.
+impl<State: Send + Sync> HttpProtocol<State> {
+    /// Creates an empty HashMap. 
     ///
-    /// The object should be mutable to add routes.
-    pub fn new() -> Self {
+    /// If http handlers require a state, then it must be passed in here. To initialize with no
+    /// state, call 'HttpProtocol::new(None::<()>'.
+    pub fn new(state: Option<State>) -> Self {
         Self {
             routes: HashMap::new(),
+            state: state.map(Arc::new),
         }
     }
 
@@ -166,30 +172,33 @@ impl HttpProtocol {
     /// # Examples
     ///
     /// ```
-    /// fn my_handler(_: &[u8]) -> http_lib::HttpResponse {
+    /// use std::sync::Arc;
+    ///
+    /// fn my_handler(_: &[u8], _: Option<&Arc<()>>) -> http_lib::HttpResponse {
     ///     http_lib::HttpResponse {
     ///         status: http_lib::Status::OK,
     ///         connection: http_lib::Connection::KeepAlive,
     ///         body: Some((http_lib::ContentType::Plain, b"Hello from http_lib".to_vec())),
     ///     }
+    ///
     /// }
     ///
-    /// let mut protocol = http_lib::HttpProtocol::new();
+    /// let mut protocol = http_lib::HttpProtocol::new(None::<()>);
     /// protocol.add_route("GET", "/", my_handler);
     /// ```
-    pub fn add_route(&mut self, method: &str, path: &str, handler: HttpHandler) {
+    pub fn add_route(&mut self, method: &str, path: &str, handler: HttpHandler<State>) {
         let key = format!("{} {}", method, path);
         self.routes.insert(key, handler);
     }
 }
 
-impl Default for HttpProtocol {
+impl<State: Send + Sync> Default for HttpProtocol<State> {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
-impl Protocol for HttpProtocol {
+impl<State: Send + Sync> Protocol for HttpProtocol<State> {
     type Message = HttpMessage;
     type Response = HttpResponse;
 
@@ -253,7 +262,7 @@ impl Protocol for HttpProtocol {
         let key = format!("{} {}", msg.method, msg.path);
 
         if let Some(handler) = self.routes.get(&key) {
-            return handler(&msg.body[..]);
+            return handler(&msg.body[..], self.state.as_ref());
         }
 
         HttpResponse {
@@ -360,7 +369,7 @@ mod tests {
 
     #[test]
     fn parse_valid_get_request() {
-        let protocol = HttpProtocol::new();
+        let protocol = HttpProtocol::new(None::<()>);
         let result = protocol.parse(b"GET /test HTTP/1.1\r\n".to_vec());
 
         assert_eq!(
@@ -376,7 +385,7 @@ mod tests {
 
     #[test]
     fn parse_valid_post_request() {
-        let protocol = HttpProtocol::new();
+        let protocol = HttpProtocol::new(None::<()>);
         let result = protocol.parse(b"POST / HTTP/1.1\r\n".to_vec());
 
         assert_eq!(
@@ -394,7 +403,7 @@ mod tests {
     fn parse_invalid_utf8_returns_none() {
         let invalid = vec![0xFF, 0xFE, 0x00];
 
-        let protocol = HttpProtocol::new();
+        let protocol = HttpProtocol::new(None::<()>);
         let result = protocol.parse(invalid);
 
         assert_eq!(result, None);
@@ -402,7 +411,7 @@ mod tests {
 
     #[test]
     fn parse_missing_token_returns_none() {
-        let protocol = HttpProtocol::new();
+        let protocol = HttpProtocol::new(None::<()>);
         let result = protocol.parse(b"GET HTTP/1.1\r\n".to_vec());
 
         assert_eq!(result, None);
@@ -410,7 +419,7 @@ mod tests {
 
     #[test]
     fn upgrade_to_web_sockets_detected() {
-        let protocol = HttpProtocol::new();
+        let protocol = HttpProtocol::new(None::<()>);
         let request = "\
             GET /chat HTTP/1.1\r\n\
             Host: example.com\r\n\
@@ -428,7 +437,7 @@ mod tests {
 
     #[test]
     fn no_key_returns_bad_request() {
-        let protocol = HttpProtocol::new();
+        let protocol = HttpProtocol::new(None::<()>);
         let request = "\
             GET /chat HTTP/1.1\r\n\
             Host: example.com\r\n\
