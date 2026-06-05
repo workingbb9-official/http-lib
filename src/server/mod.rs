@@ -118,7 +118,7 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///         .buf_size(8192)
     ///         .timeout(Duration::from_millis(3500));
     ///
-    ///     let protocol = http_lib::HttpProtocol::new();
+    ///     let protocol = http_lib::HttpProtocol::new(None::<()>);
     ///
     ///     // Use localhost (connect to same machine)
     ///     let server = http_lib::Server::new("127.0.0.1:0", config, protocol)
@@ -163,7 +163,7 @@ impl<P: Protocol + std::marker::Sync + 'static> Server<P> {
     ///         .buf_size(8192)
     ///         .timeout(Duration::from_millis(3500));
     ///
-    ///     let protocol = http_lib::HttpProtocol::new();
+    ///     let protocol = http_lib::HttpProtocol::new(None::<()>);
     ///     let server = http_lib::Server::new("127.0.0.1:8080", config, protocol)
     ///         .await
     ///         .expect("Failed to create server");
